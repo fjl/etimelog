@@ -1,0 +1,7 @@
+{application, etimelog,
+  [{description, "a simple time logger inspired by gtimelog"},
+   {registered, [etimelog_sup]},
+   {applications, [kernel, stdlib]},
+   {mod, {etimelog, []}},
+   {env, []}
+]}.
