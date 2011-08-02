@@ -25,6 +25,7 @@ all_entries() ->
 init({LogFilename}) ->
     case open_logfile(LogFilename) of
         {ok, LogFile} ->
+            {ok, _} = file:position(LogFile, eof),
             {ok, #state{filename = LogFilename, file = LogFile}};
         {error, Error} ->
             {stop, Error}
