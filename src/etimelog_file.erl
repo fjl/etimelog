@@ -59,7 +59,7 @@ open_logfile(Filename) ->
     file:open(Filename, [write, read, read_ahead, raw, binary]).
 
 write_entry(File, #entry{time = Time, text = Text}) ->
-    EntryLine = [fmt_time(Time), ": ", Text, "\n"],
+    EntryLine = [fmt_time(local_to_utc(Time)), ": ", Text, "\n"],
     file:write(File, EntryLine),
     file:datasync(File).
 
@@ -67,7 +67,7 @@ fmt_time({{Year, Month, Day}, {Hour, Min, _Sec}}) ->
     io_lib:format("~4..0b-~2..0b-~2..0b ~2..0b:~2..0b", [Year, Month, Day, Hour, Min]).
 
 make_entry(Text) ->
-    Time = calendar:universal_time(),
+    Time = calendar:local_time(),
     (parse_text(Text))#entry{time = Time}.
 
 parse_text(Text) ->
@@ -116,7 +116,7 @@ parse_line(Line) ->
     case re:run(Line, "^(" ?TS_Regex "): (.*)\n$", [{capture, all_but_first, list}]) of
         {match, [Timestamp, Text]} ->
             {ok, TS} = read_date(Timestamp),
-            (parse_text(Text))#entry{time = TS};
+            (parse_text(Text))#entry{time = utc_to_local(TS)};
         nomatch ->
             undefined
     end.
@@ -127,4 +127,12 @@ read_date(Str) ->
             {ok, {{Year, Month, Day}, {Hour, Minute, 0}}};
         {error, Error} ->
             {error, Error}
+    end.
+
+utc_to_local(DateTime) ->
+    calendar:universal_time_to_local_time(DateTime).
+local_to_utc(DateTime) ->
+    case calendar:universal_time_to_local_time(DateTime) of
+        [LocalTime]    -> LocalTime;
+        [LocalTime, _] -> LocalTime  %% honestly, what's the correct answer here?
     end.
