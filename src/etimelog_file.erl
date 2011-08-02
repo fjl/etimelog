@@ -56,20 +56,24 @@ handle_info(_InfoMsg, State) ->
 %% --------------------------------------------------------------------------------
 %% -- helpers
 open_logfile(Filename) ->
-    file:open(Filename, [write, read, read_ahead, raw]).
+    file:open(Filename, [write, read, read_ahead, raw, binary]).
 
-write_entry(File, #entry{time = Time, tag = Tag, text = Text}) ->
-    EntryLine = [fmt_time(Time), " ", atom_to_list(Tag), " ", Text, "\n"],
+write_entry(File, #entry{time = Time, text = Text}) ->
+    EntryLine = [fmt_time(Time), ": ", Text, "\n"],
     file:write(File, EntryLine),
     file:datasync(File).
 
-fmt_time({{Year, Month, Day}, {Hour, Min, Sec}}) ->
-    io_lib:format("~4..0b-~2..0b-~2..0bT~2..0b:~2..0b:~2..0b", [Year, Month, Day, Hour, Min, Sec]).
+fmt_time({{Year, Month, Day}, {Hour, Min, _Sec}}) ->
+    io_lib:format("~4..0b-~2..0b-~2..0b ~2..0b:~2..0b", [Year, Month, Day, Hour, Min]).
 
 make_entry(Text) ->
     Time = calendar:universal_time(),
-    Tag  = get_tag(Text),
-    #entry{time = Time, tag = Tag, text = Text}.
+    (parse_text(Text))#entry{time = Time}.
+
+parse_text(Text) ->
+    Stripped = string:strip(string:strip(Text, both, $\s), right, $\n),
+    Tag      = get_tag(Stripped),
+    #entry{tag = Tag, text = Stripped}.
 
 %% parses gtimelog-style entries:
 %%   three starts at the end: excluded entry
@@ -106,21 +110,21 @@ do_lines(File, Fun, Acc) ->
             {error, Error}
     end.
 
--define(TS_Regex, "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}").
+-define(TS_Regex, "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}").
 
 parse_line(Line) ->
-    case re:run(Line, "^(" ?TS_Regex ") ([a-z]+) (.*)\n$", [{capture, all_but_first, list}]) of
-        {match, [Timestamp, Tag, Text]} ->
+    case re:run(Line, "^(" ?TS_Regex "): (.*)\n$", [{capture, all_but_first, list}]) of
+        {match, [Timestamp, Text]} ->
             {ok, TS} = read_date(Timestamp),
-            #entry{time = TS, tag = list_to_existing_atom(Tag), text = Text};
+            (parse_text(Text))#entry{time = TS};
         nomatch ->
             undefined
     end.
 
 read_date(Str) ->
-    case io_lib:fread("~4d-~2d-~2dT~2d:~2d:~2d", Str) of
-        {ok, [Year, Month, Day, Hour, Minute, Second], _} ->
-            {ok, {{Year, Month, Day}, {Hour, Minute, Second}}};
+    case io_lib:fread("~4d-~2d-~2d ~2d:~2d", Str) of
+        {ok, [Year, Month, Day, Hour, Minute], _} ->
+            {ok, {{Year, Month, Day}, {Hour, Minute, 0}}};
         {error, Error} ->
             {error, Error}
     end.

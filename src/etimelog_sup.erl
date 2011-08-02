@@ -21,4 +21,4 @@ init({}) ->
     {ok, {{one_for_one, 5, 10}, [FileWorker]}}.
 
 timelog_file() ->
-    filename:join([os:getenv("HOME"), ".etimelog", "time.log"]).
+    filename:join([os:getenv("HOME"), ".etimelog", "timelog.txt"]).
