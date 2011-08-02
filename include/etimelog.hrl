@@ -1,0 +1,1 @@
+-record(entry, {time, tag, text}).
