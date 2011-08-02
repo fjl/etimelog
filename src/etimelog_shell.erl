@@ -24,7 +24,7 @@ input_loop() ->
             io:format("~nbye~n", []),
             halt(0);
         Data when is_list(Data) ->
-            case do_input_line(Data) of
+            case do_input_line(string:strip(string:strip(Data, right, $\n), both, $\s)) of
                 {error, Message} ->
                     io:format("error: ~s~n", [Message]);
                 {ok, Output} ->
@@ -39,10 +39,10 @@ input_loop() ->
     end.
 
 do_input_line("," ++ Line) ->
-    Input = string:tokens(string:strip(Line, right, $\n), " "),
-    run_command(Input);
-do_input_line(Line) ->
-    Input = string:strip(Line, right, $\n),
+    run_command(string:tokens(Line, " "));
+do_input_line("") ->
+    {error, "nothing entered"};
+do_input_line(Input) ->
     etimelog_file:add_entry(Input).
 
 run_command(["all"]) ->
@@ -62,7 +62,7 @@ complete_input(Line) ->
         {match, [RevCommand]} ->
             command_completions(lists:reverse(RevCommand));
         nomatch ->
-            {yes, "\t", []}
+            {yes, " ", []}
     end.
 
 command_completions(Str) ->
