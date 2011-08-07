@@ -46,7 +46,7 @@ do_input_line(Input) ->
     etimelog_file:add_entry(Input).
 
 run_command(["all"]) ->
-    {ok, Entries} = etimelog_file:all_entries(),
+    Entries = etimelog_file:all_entries(),
     {ok, io_lib:format("~p", [Entries])};
 run_command(["quit"]) ->
     quit;

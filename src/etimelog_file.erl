@@ -1,7 +1,7 @@
 -module(etimelog_file).
 -behaviour(gen_server).
 
--export([start_link/1, add_entry/1, all_entries/0]).
+-export([start_link/1, add_entry/1, all_entries/0, today_entries/0, day_entries/1, refresh/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, etimelog_file).
@@ -18,27 +18,55 @@ add_entry(Text) ->
 all_entries() ->
     gen_server:call(?SERVER, all_entries).
 
+today_entries() ->
+    {Today, _} = calendar:local_time(),
+    day_entries(Today).
+
+day_entries(Day = {_, _, _}) ->
+    gen_server:call(?SERVER, {day_entries, Day}).
+
+refresh() ->
+    gen_server:call(?SERVER, refresh).
+
 %% --------------------------------------------------------------------------------
 %% -- gen_server callbacks
--record(state, {filename, file}).
+-record(state, {filename, file, entries}).
 
 init({LogFilename}) ->
     case open_logfile(LogFilename) of
         {ok, LogFile} ->
-            {ok, _} = file:position(LogFile, eof),
-            {ok, #state{filename = LogFilename, file = LogFile}};
+            {ok, _}       = file:position(LogFile, eof),
+            {ok, Entries} = logfile_entries(LogFile),
+            {ok, #state{filename = LogFilename, file = LogFile, entries = Entries}};
         {error, Error} ->
             {stop, Error}
     end.
 
-handle_call({entry, Entry = #entry{}}, _From, State = #state{file = LogFile}) ->
-    case write_entry(LogFile, Entry) of
-        ok             -> {reply, ok, State};
-        {error, Error} -> {reply, {error, Error}, State}
+handle_call({entry, NewEntry}, _From, State = #state{file = LogFile, entries = Entries}) ->
+    case write_entry(LogFile, NewEntry) of
+        {error, Error} ->
+            {reply, {error, Error}, State};
+        ok ->
+            NewState = State#state{entries = collect_entry(NewEntry, get_virtual_midnight(), Entries)},
+            {reply, ok, NewState}
     end;
-handle_call(all_entries, _From, State = #state{file = LogFile}) ->
-    Reply = fold_entries(fun (E, Acc) -> [E | Acc] end, [], LogFile),
-    {reply, Reply, State};
+
+handle_call(all_entries, _From, State = #state{entries = Entries}) ->
+    {reply, Entries, State};
+
+handle_call({day_entries, Day}, _From, State = #state{entries = Entries}) ->
+    case proplists:get_value(Day, Entries) of
+        undefined ->
+            {reply, [], State};
+        DayEntries ->
+            {reply, DayEntries, State}
+    end;
+
+handle_call(refresh, _From, State = #state{file = File}) ->
+    {ok, NewEntries} = logfile_entries(File),
+    NewState = State#state{entries = NewEntries},
+    {reply, ok, NewState};
+
 handle_call(_Other, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -58,6 +86,43 @@ handle_info(_InfoMsg, State) ->
 open_logfile(Filename) ->
     file:open(Filename, [write, read, read_ahead, raw, binary]).
 
+logfile_entries(File) ->
+    VirtualMidnight = get_virtual_midnight(),
+    fold_entries(fun (E, Acc) -> collect_entry(E, VirtualMidnight, Acc) end, [], File).
+
+collect_entry(Entry = #entry{time = {Day, _Time}}, _VirtualMidnight, []) ->
+    [{Day, [Entry#entry{duration = 0, first_of_day = true}]}];
+collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry | _]} | AccRest]) ->
+    case on_same_day(Entry, LastEntry, VirtualMidnight) of
+        true ->
+            NewEntry = Entry#entry{first_of_day = false, duration = time_diff(LastEntry#entry.time, Entry#entry.time)},
+            [{LastDay, [NewEntry | LastDayAcc]} | AccRest];
+        false ->
+            NewDay = element(1, Entry#entry.time),
+            NewEntry = Entry#entry{first_of_day = true, duration = 0},
+            [{NewDay, [NewEntry]} | Acc]
+    end.
+
+on_same_day(#entry{time = {LastDay, LastTime}}, #entry{time = {CurrentDay, CurrentTime}}, VirtualMidnight) ->
+    NextDay = next_day({LastDay, LastTime}),
+    case CurrentDay of
+        LastDay                                     -> true;
+        NextDay when CurrentTime =< VirtualMidnight -> true;
+        _                                           -> false
+    end.
+
+next_day(Datetime) ->
+    calendar:gregorian_seconds_to_datetime(86400 + calendar:datetime_to_gregorian_seconds(Datetime)).
+
+time_diff(Date1, Date2) ->
+    calendar:datetime_to_gregorian_seconds(Date2) - calendar:datetime_to_gregorian_seconds(Date1).
+
+get_virtual_midnight() ->
+    {ok, MidnightSpec} = application:get_env(etimelog, virtual_midnight),
+    parse_timespec(MidnightSpec).
+
+%% --------------------------------------------------------------------------------
+%% -- file parsing and writing
 write_entry(File, #entry{time = Time, text = Text}) ->
     EntryLine = [fmt_time(local_to_utc(Time)), ": ", Text, "\n"],
     file:write(File, EntryLine),
@@ -87,6 +152,16 @@ get_tag(Text) ->
                 match   -> slacking;
                 nomatch -> regular
             end
+    end.
+
+%% Str is a timespec in local time, e.g. "08:42", "9:30" or "14:55"
+parse_timespec(Str) ->
+    case re:run(Str, "^([0-9]{1,2}):([0-9]{2})$", [{capture, all_but_first, list}]) of
+        {match, [HS, MS]} ->
+            {LocalDate, _LTime} = calendar:local_time(),
+            local_to_utc({LocalDate, {list_to_integer(HS), list_to_integer(MS), 0}});
+        nomatch ->
+            undefined
     end.
 
 fold_entries(Fun, Acc0, File) ->
@@ -132,7 +207,7 @@ read_date(Str) ->
 utc_to_local(DateTime) ->
     calendar:universal_time_to_local_time(DateTime).
 local_to_utc(DateTime) ->
-    case calendar:universal_time_to_local_time(DateTime) of
+    case calendar:local_time_to_universal_time_dst(DateTime) of
         [LocalTime]    -> LocalTime;
         [LocalTime, _] -> LocalTime  %% honestly, what's the correct answer here?
     end.

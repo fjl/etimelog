@@ -3,5 +3,5 @@
    {registered, [etimelog_sup]},
    {applications, [kernel, stdlib]},
    {mod, {etimelog, []}},
-   {env, []}
+   {env, [{virtual_midnight, "2:00"}]}
 ]}.
