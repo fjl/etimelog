@@ -19,11 +19,12 @@ all_entries() ->
     gen_server:call(?SERVER, all_entries).
 
 today_entries() ->
-    {Today, _} = calendar:local_time(),
-    day_entries(Today).
+    day_entries(calendar:local_time()).
 
 day_entries(Day = {_, _, _}) ->
-    gen_server:call(?SERVER, {day_entries, Day}).
+    day_entries({Day, {0,0,0}});
+day_entries(DateTime = {{_, _, _}, {_, _, _}}) ->
+    gen_server:call(?SERVER, {day_entries, DateTime}).
 
 refresh() ->
     gen_server:call(?SERVER, refresh).
@@ -54,13 +55,13 @@ handle_call({entry, NewEntry}, _From, State = #state{file = LogFile, entries = E
 handle_call(all_entries, _From, State = #state{entries = Entries}) ->
     {reply, Entries, State};
 
-handle_call({day_entries, Day}, _From, State = #state{entries = Entries}) ->
-    case proplists:get_value(Day, Entries) of
-        undefined ->
-            {reply, [], State};
-        DayEntries ->
-            {reply, DayEntries, State}
-    end;
+handle_call({day_entries, DateTime}, _From, State = #state{entries = Entries}) ->
+    PrevDay = prev_day(DateTime),
+    case on_same_day(DateTime, PrevDay, get_virtual_midnight()) of
+        true  -> {LookupDay, _} = PrevDay;
+        false -> {LookupDay, _} = DateTime
+    end,
+    {reply, {LookupDay, proplists:get_value(LookupDay, Entries, [])}, State};
 
 handle_call(refresh, _From, State = #state{file = File}) ->
     {ok, NewEntries} = logfile_entries(File),
@@ -93,7 +94,7 @@ logfile_entries(File) ->
 collect_entry(Entry = #entry{time = {Day, _Time}}, _VirtualMidnight, []) ->
     [{Day, [Entry#entry{duration = 0, first_of_day = true}]}];
 collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry | _]} | AccRest]) ->
-    case on_same_day(Entry, LastEntry, VirtualMidnight) of
+    case on_same_day(Entry#entry.time, LastEntry#entry.time, VirtualMidnight) of
         true ->
             NewEntry = Entry#entry{first_of_day = false, duration = time_diff(LastEntry#entry.time, Entry#entry.time)},
             [{LastDay, [NewEntry | LastDayAcc]} | AccRest];
@@ -103,7 +104,7 @@ collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry |
             [{NewDay, [NewEntry]} | Acc]
     end.
 
-on_same_day(#entry{time = {LastDay, LastTime}}, #entry{time = {CurrentDay, CurrentTime}}, VirtualMidnight) ->
+on_same_day({CurrentDay, CurrentTime}, {LastDay, LastTime}, VirtualMidnight) ->
     NextDay = next_day({LastDay, LastTime}),
     case CurrentDay of
         LastDay                                     -> true;
@@ -113,6 +114,9 @@ on_same_day(#entry{time = {LastDay, LastTime}}, #entry{time = {CurrentDay, Curre
 
 next_day(Datetime) ->
     calendar:gregorian_seconds_to_datetime(86400 + calendar:datetime_to_gregorian_seconds(Datetime)).
+
+prev_day(Datetime) ->
+    calendar:gregorian_seconds_to_datetime(calendar:datetime_to_gregorian_seconds(Datetime) - 86400).
 
 time_diff(Date1, Date2) ->
     calendar:datetime_to_gregorian_seconds(Date2) - calendar:datetime_to_gregorian_seconds(Date1).
