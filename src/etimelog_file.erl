@@ -136,8 +136,8 @@ fmt_time({{Year, Month, Day}, {Hour, Min, _Sec}}) ->
     io_lib:format("~4..0b-~2..0b-~2..0b ~2..0b:~2..0b", [Year, Month, Day, Hour, Min]).
 
 make_entry(Text) ->
-    Time = calendar:local_time(),
-    (parse_text(Text))#entry{time = Time}.
+    {Day, {Hours, Minutes, _Seconds}} = calendar:local_time(),
+    (parse_text(Text))#entry{time = {Day, {Hours, Minutes, 0}}}.
 
 parse_text(Text) ->
     Stripped = string:strip(string:strip(Text, both, $\s), right, $\n),
