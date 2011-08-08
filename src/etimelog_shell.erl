@@ -72,12 +72,15 @@ do_input_line(Input) ->
 
 run_command(["all"]) ->
     lists:foreach(fun ({Day, DayEntries}) ->
-                          show_day(Day, DayEntries)
+                          show_day(Day, DayEntries),
+                          io:nl()
                   end, lists:reverse(etimelog_file:all_entries())),
     ok;
 run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
     show_day(Today, Entries),
+    WorkTime = lists:foldl(fun (#entry{duration = D}, Acc) -> D + Acc end, 0, Entries),
+    io:format("total: ~s~n", [format_duration(WorkTime)]),
     ok;
 run_command(["edit"]) ->
     case get_editor() of
@@ -98,8 +101,7 @@ run_command(Other) ->
 %% -- output
 show_day(Day, Entries) ->
     io:put_chars([format_day(Day), "\n"]),
-    show_table(entry_table(lists:reverse(Entries))),
-    io:nl().
+    show_table(entry_table(lists:reverse(Entries))).
 
 entry_table([]) ->
     [{"no entries"}];
@@ -109,8 +111,13 @@ entry_table(Entries) ->
 entry_row(#entry{first_of_day = true, time = {_Day, Time}, text = Text}) ->
     {"(", "", "-", format_time(Time), ")", Text};
 entry_row(#entry{duration = Secs, time = {_Day, Time}, text = Text}) ->
-    Duration = format_duration(Secs, [{3600, "h"}, {60, "m"}, {1, "s"}]),
+    Duration = format_duration(Secs),
     {"(", Duration, "-", format_time(Time), ")", Text}.
+
+format_duration(0) ->
+    "0m";
+format_duration(Seconds) ->
+    format_duration(Seconds, [{3600, "h"}, {60, "m"}, {1, "s"}]).
 
 format_duration(0, _) ->
     [];
