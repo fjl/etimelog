@@ -81,7 +81,7 @@ run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
     show_day(Today, Entries),
     WorkTime = lists:foldl(fun (#entry{duration = D}, Acc) -> D + Acc end, 0, Entries),
-    io:format("total: ~s~n", [format_duration(WorkTime)]),
+    (WorkTime > 0) andalso io:format("total: ~s~n", [format_duration(WorkTime)]),
     ok;
 run_command(["edit"]) ->
     case get_editor() of
