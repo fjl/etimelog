@@ -6,6 +6,7 @@
 -define(USER_DRV, 'tty_sl -c -e').
 
 start() ->
+    patch_user_drv(),
     user_drv:start(?USER_DRV, {?MODULE, start_shell, [undefined]}).
 
 banner() ->
@@ -261,3 +262,43 @@ command_completions(Str) ->
         MatchedCommands ->
             {no, [], lists:map(fun ({Cmd, Desc}) -> Cmd ++ " -- " ++ Desc ++ "           " end, MatchedCommands)}
     end.
+
+%% --------------------------------------------------------------------------------
+%% -- user_drv hot patching (strip out call to system_info(version))
+patch_user_drv() ->
+    patch_module(user_drv, fun transform_user_drv/1).
+
+transform_user_drv({call, Line,
+                       {remote,_,{atom,_,io_lib},{atom,_,format}},
+                       [{string,_,"~s\n"},
+                        {cons,_,
+                            {call,_,
+                                {remote,_,{atom,_,erlang},{atom,_,system_info}},
+                                [{atom,_,system_version}]},
+                            {nil,132}}]}) ->
+    {replace, {string, Line, ""}};
+
+%% not strictly necessary, just for forward compatibility
+transform_user_drv({call, Line, {remote, _, {atom,_,erlang}, {atom,_,system_info}}, [{atom,_,system_version}]}) ->
+    {replace, {string, Line, ""}};
+
+transform_user_drv(AnythingElse) ->
+    {descend, AnythingElse}.
+
+patch_module(Mod, Transform) ->
+    File = code:which(Mod),
+    {ok, {Mod, [{abstract_code, {raw_abstract_v1, Code}}]}} = beam_lib:chunks(File, [abstract_code]),
+    NewCode = patch_abstract_code(Code, Transform),
+    {ok, Mod, NewCodeBin} = compile:forms(NewCode, [binary]),
+    code:unstick_mod(Mod),
+    code:load_binary(Mod, File, NewCodeBin).
+
+patch_abstract_code(Code, Transform) when is_tuple(Code) ->
+    case Transform(Code) of
+        {replace, NewCode} -> NewCode;
+        {descend, NewCode} -> list_to_tuple([patch_abstract_code(S, Transform) || S <- tuple_to_list(NewCode)])
+    end;
+patch_abstract_code(Code, Transform) when is_list(Code) ->
+    [patch_abstract_code(S, Transform) || S <- Code];
+patch_abstract_code(Code, _Transform) ->
+    Code.
