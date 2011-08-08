@@ -1,7 +1,8 @@
 -module(etimelog_file).
 -behaviour(gen_server).
 
--export([start_link/1, add_entry/1, all_entries/0, today_entries/0, day_entries/1, refresh/0]).
+-export([start_link/1, add_entry/1, all_entries/0, today_entries/0, day_entries/1, refresh/0,
+         filename/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, etimelog_file).
@@ -28,6 +29,9 @@ day_entries(DateTime = {{_, _, _}, {_, _, _}}) ->
 
 refresh() ->
     gen_server:call(?SERVER, refresh).
+
+filename() ->
+    gen_server:call(?SERVER, filename).
 
 %% --------------------------------------------------------------------------------
 %% -- gen_server callbacks
@@ -67,6 +71,9 @@ handle_call(refresh, _From, State = #state{file = File}) ->
     {ok, NewEntries} = logfile_entries(File),
     NewState = State#state{entries = NewEntries},
     {reply, ok, NewState};
+
+handle_call(filename, _From, State = #state{filename = Filename}) ->
+    {reply, Filename, State};
 
 handle_call(_Other, _From, State) ->
     {reply, {error, unknown_call}, State}.

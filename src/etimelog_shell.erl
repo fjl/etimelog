@@ -1,24 +1,44 @@
 -module(etimelog_shell).
--export([start/0, start_shell/0]).
+-export([start/0, start_shell/1]).
 -export([complete_input/1]).
 
 -include("etimelog.hrl").
+-define(USER_DRV, 'tty_sl -c -e').
 
 start() ->
-    user_drv:start('tty_sl -c -e', {?MODULE, start_shell, []}),
-    timer:sleep(infinity).
+    user_drv:start(?USER_DRV, {?MODULE, start_shell, [undefined]}).
 
 banner() ->
     {ok, Vsn} = application:get_key(etimelog, vsn),
     io:format("=== etimelog (~s)~n", [Vsn]).
 
-start_shell() ->
-    spawn(fun () ->
-                application:start(etimelog),
-                banner(),
-                io:setopts([{encoding, utf8}, {expand_fun, fun complete_input/1}]),
-                input_loop()
-          end).
+start_shell(undefined) ->
+    spawn_link(fun () ->
+                       application:start(etimelog),
+                       banner(),
+                       io:setopts([{encoding, utf8}, {expand_fun, fun complete_input/1}]),
+                       input_loop()
+               end);
+start_shell(PrevShell) when is_pid(PrevShell) ->
+    PrevShell ! {new_group, group_leader()},
+    PrevShell.
+
+stop_user_drv() ->
+    UserDrv = whereis(user_drv),
+    exit(UserDrv, please_die),
+
+    %% close user_drv port
+    PortName = atom_to_list(?USER_DRV),
+    [Port] = [P || P <- erlang:ports(), proplists:get_value(name, erlang:port_info(P)) =:= PortName],
+    erlang:port_close(Port).
+
+restart_user_drv() ->
+    user_drv:start(?USER_DRV, {?MODULE, start_shell, [self()]}),
+    receive
+        {new_group, Group} ->
+            io:setopts(Group, [{encoding, utf8}, {expand_fun, fun complete_input/1}]),
+            group_leader(Group, self())
+    end.
 
 %% --------------------------------------------------------------------------------
 %% -- interpreter
@@ -30,16 +50,17 @@ input_loop() ->
         Data when is_list(Data) ->
             case do_input_line(string:strip(string:strip(Data, right, $\n), both, $\s)) of
                 {error, Message} ->
-                    io:format("error: ~s~n", [Message]);
+                    io:format("error: ~s~n", [Message]),
+                    input_loop();
                 {ok, Output} ->
-                    io:format("~s~n", Output);
+                    io:format("~s~n", Output),
+                    input_loop();
                 ok ->
-                    no_output;
+                    input_loop();
                 quit ->
                     io:format("bye~n", []),
                     halt(0)
-            end,
-            input_loop()
+            end
     end.
 
 do_input_line("," ++ Line) ->
@@ -58,11 +79,21 @@ run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
     show_day(Today, Entries),
     ok;
+run_command(["edit"]) ->
+    case get_editor() of
+        {error, unset} ->
+            {error, "neither VISUAL nor EDITOR are set"};
+        {ok, EditorCmd} ->
+            launch_editor(EditorCmd, etimelog_file:filename()),
+            etimelog_file:refresh()
+    end;
 run_command(["quit"]) ->
     quit;
 run_command(Other) ->
     {error, ["unknown command: ,", string:join(Other, " ")]}.
 
+%% --------------------------------------------------------------------------------
+%% -- output
 show_day(Day, Entries) ->
     io:put_chars([format_day(Day), "\n"]),
     show_table(entry_table(lists:reverse(Entries))),
@@ -158,9 +189,45 @@ pad_str(Str, N) ->
     end.
 
 %% --------------------------------------------------------------------------------
+%% -- editing
+get_editor() ->
+    case os:getenv("VISUAL") of
+        Str when Str /= false, Str /= "" ->
+            {ok, string:tokens(Str, " ")};
+        _ ->
+            case os:getenv("EDITOR") of
+                Str when Str /= false, Str /= "" ->
+                    {ok, string:tokens(Str, " ")};
+                _ ->
+                    {error, unset}
+            end
+    end.
+
+launch_editor([EditorCmd | EditorArgs], TimelogFile) ->
+    stop_user_drv(),
+    try erlang:open_port({spawn_executable, os:find_executable(EditorCmd)}, [{args, EditorArgs ++ [TimelogFile]}, exit_status, nouse_stdio]) of
+        Port ->
+            io:format("waiting for editor \"~s\"~n", [string:join([EditorCmd | EditorArgs], " ")]),
+            wait_editor_exit(Port)
+    catch
+        error:Error ->
+            {error, io_lib:format("could not start editor: ~s~n", [file:format_error(Error)])}
+    after
+        restart_user_drv()
+    end.
+
+wait_editor_exit(Port) ->
+    receive
+        {Port, {exit_status, 0}} -> ok;
+        {Port, {exit_status, Status}} ->
+            {error, io_lib:format("editor exit status non-zero: ~p", [Status])}
+    end.
+
+%% --------------------------------------------------------------------------------
 %% -- completion
 all_commands() ->
     [{"all",   "show all timelog entries"},
+     {"edit",  "edit the timelog file"},
      {"today", "show today's entries and work time"},
      {"quit",  "quit etimelog"}].
 
