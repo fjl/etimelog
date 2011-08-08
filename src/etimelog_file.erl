@@ -35,20 +35,14 @@ filename() ->
 
 %% --------------------------------------------------------------------------------
 %% -- gen_server callbacks
--record(state, {filename, file, entries}).
+-record(state, {filename, entries}).
 
 init({LogFilename}) ->
-    case open_logfile(LogFilename) of
-        {ok, LogFile} ->
-            {ok, _}       = file:position(LogFile, eof),
-            {ok, Entries} = logfile_entries(LogFile),
-            {ok, #state{filename = LogFilename, file = LogFile, entries = Entries}};
-        {error, Error} ->
-            {stop, Error}
-    end.
+    {ok, Entries} = logfile_entries(LogFilename),
+    {ok, #state{filename = LogFilename, entries = Entries}}.
 
-handle_call({entry, NewEntry}, _From, State = #state{file = LogFile, entries = Entries}) ->
-    case write_entry(LogFile, NewEntry) of
+handle_call({entry, NewEntry}, _From, State = #state{filename = LogFilename, entries = Entries}) ->
+    case write_entry(LogFilename, NewEntry) of
         {error, Error} ->
             {reply, {error, Error}, State};
         ok ->
@@ -67,8 +61,8 @@ handle_call({day_entries, DateTime}, _From, State = #state{entries = Entries}) -
     end,
     {reply, {LookupDay, proplists:get_value(LookupDay, Entries, [])}, State};
 
-handle_call(refresh, _From, State = #state{file = File}) ->
-    {ok, NewEntries} = logfile_entries(File),
+handle_call(refresh, _From, State = #state{filename = LogFilename}) ->
+    {ok, NewEntries} = logfile_entries(LogFilename),
     NewState = State#state{entries = NewEntries},
     {reply, ok, NewState};
 
@@ -78,10 +72,9 @@ handle_call(filename, _From, State = #state{filename = Filename}) ->
 handle_call(_Other, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
-terminate(_Reason, State) ->
-    file:close(State#state.file).
-
 %% unused
+terminate(_Reason, _State) ->
+    ok.
 code_change(_FromVsn, _ToVsn, State) ->
     {ok, State}.
 handle_cast(_Cast, State) ->
@@ -91,13 +84,6 @@ handle_info(_InfoMsg, State) ->
 
 %% --------------------------------------------------------------------------------
 %% -- helpers
-open_logfile(Filename) ->
-    file:open(Filename, [write, read, read_ahead, raw, binary]).
-
-logfile_entries(File) ->
-    VirtualMidnight = get_virtual_midnight(),
-    fold_entries(fun (E, Acc) -> collect_entry(E, VirtualMidnight, Acc) end, [], File).
-
 collect_entry(Entry = #entry{time = {Day, _Time}}, _VirtualMidnight, []) ->
     [{Day, [Entry#entry{duration = 0, first_of_day = true}]}];
 collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry | _]} | AccRest]) ->
@@ -134,10 +120,25 @@ get_virtual_midnight() ->
 
 %% --------------------------------------------------------------------------------
 %% -- file parsing and writing
-write_entry(File, #entry{time = Time, text = Text}) ->
-    EntryLine = [fmt_time(local_to_utc(Time)), ": ", Text, "\n"],
-    file:write(File, EntryLine),
-    file:datasync(File).
+with_logfile(Fun, Filename, ModeList) ->
+    {ok, File} = file:open(Filename, [raw, binary | ModeList]),
+    try
+        Fun(File)
+    after
+        file:close(File)
+    end.
+
+logfile_entries(Filename) ->
+    with_logfile(fun (File) ->
+                         VirtualMidnight = get_virtual_midnight(),
+                         fold_entries(fun (E, Acc) -> collect_entry(E, VirtualMidnight, Acc) end, [], File)
+                 end, Filename, [read, read_ahead]).
+
+write_entry(Filename, #entry{time = Time, text = Text}) ->
+    with_logfile(fun (File) ->
+                         EntryLine = [fmt_time(local_to_utc(Time)), ": ", Text, "\n"],
+                         file:write(File, EntryLine)
+                 end, Filename, [write, append]).
 
 fmt_time({{Year, Month, Day}, {Hour, Min, _Sec}}) ->
     io_lib:format("~4..0b-~2..0b-~2..0b ~2..0b:~2..0b", [Year, Month, Day, Hour, Min]).
@@ -175,20 +176,14 @@ parse_timespec(Str) ->
             undefined
     end.
 
-fold_entries(Fun, Acc0, File) ->
-    file:position(File, bof),
-    AccEnd = do_lines(File, Fun, Acc0),
-    file:position(File, eof),
-    AccEnd.
-
-do_lines(File, Fun, Acc) ->
+fold_entries(Fun, Acc, File) ->
     case file:read_line(File) of
         {ok, Line} ->
             case parse_line(Line) of
                 E = #entry{} ->
-                    do_lines(File, Fun, Fun(E, Acc));
+                    fold_entries(Fun, Fun(E, Acc), File);
                 undefined ->
-                    do_lines(File, Fun, Acc)
+                    fold_entries(Fun, Acc, File)
             end;
         eof ->
             {ok, Acc};
