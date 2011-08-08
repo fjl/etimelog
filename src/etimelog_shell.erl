@@ -80,8 +80,8 @@ run_command(["all"]) ->
 run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
     show_day(Today, Entries),
-    WorkTime = lists:foldl(fun (#entry{duration = D}, Acc) -> D + Acc end, 0, Entries),
-    (WorkTime > 0) andalso io:format("total: ~s~n", [format_duration(WorkTime)]),
+    {WorkTime, SlackTime} = sum_times(Entries),
+    (WorkTime > 0) andalso io:format("total: ~s (** ~s)~n", [format_duration(WorkTime), format_duration(SlackTime)]),
     ok;
 run_command(["edit"]) ->
     case get_editor() of
@@ -97,6 +97,15 @@ run_command(["quit"]) ->
     quit;
 run_command(Other) ->
     {error, ["unknown command: ,", string:join(Other, " ")]}.
+
+sum_times(Entries) ->
+    lists:foldl(fun (#entry{duration = D, tag = Activity}, {WT, ST}) ->
+                        case Activity of
+                            regular  -> {WT + D, ST};
+                            slacking -> {WT, ST + D};
+                            excluded -> {WT, ST}
+                        end
+                end, {0, 0}, Entries).
 
 %% --------------------------------------------------------------------------------
 %% -- output
