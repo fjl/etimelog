@@ -1,8 +1,9 @@
 -module(etimelog_file).
 -behaviour(gen_server).
 
--export([start_link/1, add_entry/1, all_entries/0, today_entries/0, day_entries/1, refresh/0,
-         filename/0]).
+-export([start_link/1, add_entry/1, all_entries/0, today_entries/0, day_entries/1,
+         last_entry/0, refresh/0, filename/0]).
+-export([time_diff/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, etimelog_file).
@@ -26,6 +27,9 @@ day_entries(Day = {_, _, _}) ->
     day_entries({Day, {0,0,0}});
 day_entries(DateTime = {{_, _, _}, {_, _, _}}) ->
     gen_server:call(?SERVER, {day_entries, DateTime}).
+
+last_entry() ->
+    gen_server:call(?SERVER, last_entry).
 
 refresh() ->
     gen_server:call(?SERVER, refresh).
@@ -60,6 +64,14 @@ handle_call({day_entries, DateTime}, _From, State = #state{entries = Entries}) -
         false -> {LookupDay, _} = DateTime
     end,
     {reply, {LookupDay, proplists:get_value(LookupDay, Entries, [])}, State};
+
+handle_call(last_entry, _From, State = #state{entries = Entries}) ->
+    case Entries of
+        [] ->
+            {reply, undefined, State};
+        [{Day, [FirstEntry | _]} | _] ->
+            {reply, {Day, FirstEntry}, State}
+    end;
 
 handle_call(refresh, _From, State = #state{filename = LogFilename}) ->
     {ok, NewEntries} = logfile_entries(LogFilename),

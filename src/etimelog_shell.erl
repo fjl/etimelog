@@ -77,6 +77,17 @@ run_command(["all"]) ->
                           io:nl()
                   end, lists:reverse(etimelog_file:all_entries())),
     ok;
+run_command(["last"]) ->
+    {Today, Now} = calendar:local_time(),
+    case etimelog_file:last_entry() of
+        undefined ->
+            io:format("no entries~n");
+        {Today, Entry} ->
+            TimeSince = format_duration(etimelog_file:time_diff(Entry#entry.time, {Today, Now})),
+            io:format("~s ago: ~s~n", [TimeSince, Entry#entry.text]);
+        {EntryDay, Entry} ->
+            io:format("on ~s: ~s~n", [format_day(EntryDay), Entry#entry.text])
+    end;
 run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
     show_day(Today, Entries),
@@ -246,6 +257,7 @@ wait_editor_exit(Port) ->
 %% -- completion
 all_commands() ->
     [{"all",     "show all timelog entries"},
+     {"last",    "show the last entry"},
      {"edit",    "edit the timelog file"},
      {"refresh", "reload the timelog file"},
      {"today",   "show today's entries and work time"},
