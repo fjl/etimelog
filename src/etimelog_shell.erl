@@ -87,6 +87,8 @@ run_command(["edit"]) ->
             launch_editor(EditorCmd, etimelog_file:filename()),
             etimelog_file:refresh()
     end;
+run_command(["refresh"]) ->
+    etimelog_file:refresh();
 run_command(["quit"]) ->
     quit;
 run_command(Other) ->
@@ -226,10 +228,11 @@ wait_editor_exit(Port) ->
 %% --------------------------------------------------------------------------------
 %% -- completion
 all_commands() ->
-    [{"all",   "show all timelog entries"},
-     {"edit",  "edit the timelog file"},
-     {"today", "show today's entries and work time"},
-     {"quit",  "quit etimelog"}].
+    [{"all",     "show all timelog entries"},
+     {"edit",    "edit the timelog file"},
+     {"refresh", "reload the timelog file"},
+     {"today",   "show today's entries and work time"},
+     {"quit",    "quit etimelog"}].
 
 complete_input(Line) ->
     case re:run(Line, "^([a-z]*),$", [{capture, all_but_first, list}]) of
