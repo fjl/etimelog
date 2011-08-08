@@ -3,7 +3,7 @@
 
 -export([start_link/1, init/1]).
 
--define(SERVER, etimlog_sup).
+-define(SERVER, etimelog_sup).
 
 %% Helper macro for declaring children of supervisor
 -define(CHILD(I, Args, Type), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
