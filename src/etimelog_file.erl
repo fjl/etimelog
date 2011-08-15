@@ -62,6 +62,7 @@ filename() ->
 -record(state, {filename, entries}).
 
 init({LogFilename}) ->
+    touch(LogFilename),
     {ok, Entries} = logfile_entries(LogFilename),
     {ok, #state{filename = LogFilename, entries = Entries}}.
 
@@ -152,6 +153,11 @@ get_virtual_midnight() ->
 
 %% --------------------------------------------------------------------------------
 %% -- file parsing and writing
+touch(Filename) ->
+    filelib:ensure_dir(Filename),
+    {ok, File} = file:open(Filename, [raw, append]),
+    file:close(File).
+
 with_logfile(Fun, Filename, ModeList) ->
     {ok, File} = file:open(Filename, [raw, binary | ModeList]),
     try
