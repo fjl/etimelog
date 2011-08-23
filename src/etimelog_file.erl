@@ -120,7 +120,7 @@ handle_info(_InfoMsg, State) ->
 collect_entry(Entry = #entry{time = {Day, _Time}}, _VirtualMidnight, []) ->
     [{Day, [Entry#entry{duration = 0, first_of_day = true}]}];
 collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry | _]} | AccRest]) ->
-    case on_same_day(Entry#entry.time, LastEntry#entry.time, VirtualMidnight) of
+    case on_same_day(Entry#entry.time, {LastDay, {0,0,0}}, VirtualMidnight) of
         true ->
             NewEntry = Entry#entry{first_of_day = false, duration = time_diff(LastEntry#entry.time, Entry#entry.time)},
             [{LastDay, [NewEntry | LastDayAcc]} | AccRest];
@@ -131,7 +131,7 @@ collect_entry(Entry, VirtualMidnight, Acc = [{LastDay, LastDayAcc = [LastEntry |
     end.
 
 on_same_day({CurrentDay, CurrentTime}, {LastDay, LastTime}, VirtualMidnight) ->
-    NextDay = next_day({LastDay, LastTime}),
+    {NextDay, _} = next_day({LastDay, LastTime}),
     case CurrentDay of
         LastDay                                     -> true;
         NextDay when CurrentTime =< VirtualMidnight -> true;
@@ -208,8 +208,7 @@ get_tag(Text) ->
 parse_timespec(Str) ->
     case re:run(Str, "^([0-9]{1,2}):([0-9]{2})$", [{capture, all_but_first, list}]) of
         {match, [HS, MS]} ->
-            {LocalDate, _LTime} = calendar:local_time(),
-            local_to_utc({LocalDate, {list_to_integer(HS), list_to_integer(MS), 0}});
+            {list_to_integer(HS), list_to_integer(MS), 0};
         nomatch ->
             undefined
     end.
