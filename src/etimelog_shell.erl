@@ -92,11 +92,8 @@ do_input_line(Input) ->
     etimelog_file:add_entry(Input).
 
 run_command(["all"]) ->
-    lists:foreach(fun ({Day, DayEntries}) ->
-                          show_day(Day, DayEntries),
-                          io:nl()
-                  end, lists:reverse(etimelog_file:all_entries())),
-    ok;
+    Tab = [[day_to_table(Day, DayEntries), {""}] || {Day, DayEntries} <- lists:reverse(etimelog_file:all_entries())],
+    show_table(lists:flatten(Tab));
 run_command(["last"]) ->
     {Today, Now} = calendar:local_time(),
     case etimelog_file:last_entry() of
@@ -110,7 +107,7 @@ run_command(["last"]) ->
     end;
 run_command(["today"]) ->
     {Today, Entries} = etimelog_file:today_entries(),
-    show_day(Today, Entries),
+    show_table(day_to_table(Today, Entries)),
     {WorkTime, SlackTime} = sum_times(Entries),
     (WorkTime > 0) andalso io:format("total: ~s (** ~s)~n", [format_duration(WorkTime), format_duration(SlackTime)]),
     ok;
@@ -140,9 +137,8 @@ sum_times(Entries) ->
 
 %% --------------------------------------------------------------------------------
 %% -- output
-show_day(Day, Entries) ->
-    io:put_chars([format_day(Day), "\n"]),
-    show_table(entry_table(lists:reverse(Entries))).
+day_to_table(Day, Entries) ->
+    [{format_day(Day)} | entry_table(lists:reverse(Entries))].
 
 entry_table([]) ->
     [{"no entries"}];
@@ -150,10 +146,10 @@ entry_table(Entries) ->
     lists:map(fun entry_row/1, Entries).
 
 entry_row(#entry{first_of_day = true, time = {_Day, Time}, text = Text}) ->
-    {"(", "", "-", format_time(Time), ")", Text};
+    {"[", format_time(Time), "", "", "] ", Text};
 entry_row(#entry{duration = Secs, time = {_Day, Time}, text = Text}) ->
     Duration = format_duration(Secs),
-    {"(", Duration, "-", format_time(Time), ")", Text}.
+    {"[", format_time(Time), " - ", Duration, "] ", Text}.
 
 format_duration(0) ->
     "0m";
@@ -213,17 +209,23 @@ ordnum(N) ->
     end.
 
 show_table(Table) ->
+    show_table(Table, "").
+show_table(Table, ColSeparator) ->
     Widths = column_widths(Table),
     lists:foreach(fun (Row) ->
-                          lists:foldl(fun (Col, N) ->
-                                              io:put_chars([pad_str(Col, proplists:get_value(N, Widths)), " "]),
+                          LastCol = tuple_size(Row),
+                          lists:foldl(fun (Col, N) when N == LastCol ->
+                                              io:put_chars([Col, $\n]); %% don't pad the last column
+                                          (Col, N) ->
+                                              io:put_chars([pad_str(Col, proplists:get_value(N, Widths)), ColSeparator]),
                                               N + 1
-                                      end, 1, tuple_to_list(Row)),
-                          io:nl()
+                                      end, 1, tuple_to_list(Row))
                   end, Table).
 
 column_widths(Table) ->
-    lists:foldl(fun (Row, OuterAcc) ->
+    lists:foldl(fun ({_OneElementRow}, OuterAcc) ->
+                        OuterAcc; %% ignore one-element rows in width calculation
+                    (Row, OuterAcc) ->
                         {_, NewAcc} = lists:foldl(fun (Col, {N, InnerAcc}) ->
                                                           LastWidth = proplists:get_value(N, InnerAcc, 0),
                                                           ColWidth = iolist_size(Col),
