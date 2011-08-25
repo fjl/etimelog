@@ -19,15 +19,33 @@
 % DEALINGS IN THE SOFTWARE.
 
 -module(etimelog_shell).
--export([start/0, start_shell/1]).
+-export([start/0, start/1, start_shell/1]).
 -export([complete_input/1]).
 
 -include("etimelog.hrl").
 -define(USER_DRV, 'tty_sl -c -e').
 
 start() ->
+    application:start(etimelog),
+    start(init:get_plain_arguments()).
+
+start([]) ->
+    %% no args -- run interactive
     patch_user_drv(),
-    user_drv:start(?USER_DRV, {?MODULE, start_shell, [undefined]}).
+    user_drv:start(?USER_DRV, {?MODULE, start_shell, [undefined]});
+start(Cmd) ->
+    %% run the given command
+    user:start(),
+    case run_command(Cmd) of
+        {error, Message} ->
+            io:format("error: ~s~n", [Message]),
+            halt(2);
+        {ok, Output} ->
+            io:format("~s~n", Output),
+            halt(0);
+        ok ->
+            halt(0)
+    end.
 
 banner() ->
     {ok, Vsn} = application:get_key(etimelog, vsn),
@@ -35,7 +53,6 @@ banner() ->
 
 start_shell(undefined) ->
     spawn_link(fun () ->
-                       application:start(etimelog),
                        banner(),
                        io:setopts([{encoding, utf8}, {expand_fun, fun complete_input/1}]),
                        input_loop()
@@ -77,10 +94,7 @@ input_loop() ->
                     io:format("~s~n", Output),
                     input_loop();
                 ok ->
-                    input_loop();
-                quit ->
-                    io:format("bye~n", []),
-                    halt(0)
+                    input_loop()
             end
     end.
 
@@ -122,7 +136,8 @@ run_command(["edit"]) ->
 run_command(["refresh"]) ->
     etimelog_file:refresh();
 run_command(["quit"]) ->
-    quit;
+    io:format("bye"),
+    halt(0);
 run_command(Other) ->
     {error, ["unknown command: ,", string:join(Other, " ")]}.
 
